@@ -9,6 +9,10 @@ class Spettro:
     def __init__(self):
         self.x = []
         self.y = []
+        self.orig_x = []
+        self.orig_y = []
+        self.use_cc = False  # Use continuum corrected flux
+        self_use_dp = False  # Use doppler shifted lambda
 
     def loadFromFile(self, filename):
         with open(filename, "r") as f:
@@ -16,6 +20,42 @@ class Spettro:
                 data = line.split()
                 self.x.append(float(data[0]))
                 self.y.append(float(data[1]))
+            self.orig_x = self.x
+            self.orig_y = self.y
+
+    def getLambdaArray(self):
+        return self.x
+
+    def getFluxArray(self):
+        return self.y
+
+    def getDispersion(self):
+        return (self.x[1] - self.x[0])
+
+    def linearInterpolation(self, x):
+        ia = min(range(len(self.x)), key=lambda i: abs(self.x[i]-x))
+        if ia == (len(self.x) - 1):
+            raise Exception('x value out of wavelenght range')
+        ib = ia + 1
+        xa = self.x[ia]
+        xb = self.x[ib]
+        ya = self.y[ia]
+        yb = self.y[ib]
+        y = (ya*(xb - x) + yb*(x - xb)) / (xb - xa)
+        return y
+
+    def dopplerCorrection(self, vel):
+        # vel in km/s
+        light_speed = 299792.458 # km/s
+        self.x = [x*(1 + vel/light_speed) for x in self.orig_x]
+        self.use_dp = True
+
+    def squareDiff(self, compare_sp):
+        a_flux = [compare_sp.linearInterpolation(x) for x in self.x]
+        b_flux = self.getFluxArray()
+
+        square_diff = [(a-b)**2 for a, b in zip(a_flux, b_flux)]
+        return sum(square_diff)
 
     def continuumCorrection(self, order, hi_rej, lo_rej, iterations, output=None, outputfile=None):
         x = self.x
@@ -53,4 +93,20 @@ class Spettro:
             
         return self.cc_y
 
+
+    def useContinuumCorretedFlux(self):
+        if not self.use_cc:
+            self.orig_y = self.y
+            self.y = self.cc_y
+            self.use_cc = True
+
+    def useOriginalFlux(self):
+        if self.use_cc:
+            self.y = self.orig_y
+            self.use_cc = False
+
+    def useOriginalLambda(self):
+        if self.use_dp:
+            self.x = self.orig_x
+            self.use_dp = False
 
