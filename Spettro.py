@@ -12,7 +12,7 @@ class Spettro:
         self.orig_x = []
         self.orig_y = []
         self.use_cc = False  # Use continuum corrected flux
-        self_use_dp = False  # Use doppler shifted lambda
+        self.use_dp = False  # Use doppler shifted lambda
 
     def loadFromFile(self, filename):
         with open(filename, "r") as f:
