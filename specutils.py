@@ -11,6 +11,7 @@ class Spettro1D:
     def __init__(self):
         # list for wavelenght and flux values
         self.wl        = []
+        self.wl_orig   = []
         self.flux      = []
         
         # ancillary informations
@@ -27,15 +28,17 @@ class Spettro1D:
 
             # get axisx units
             self.flux_unit = file[0].header['BUNIT']
-            matches = re.findall(r"wtype=\w+ label=\w+ units=(\w+)", file[0].header['WAT1_001'])
-            self.wl_unit = matches[0]
+            matches        = re.findall(r"wtype=\w+ label=\w+ units=(\w+)", file[0].header['WAT1_001'])
+            self.wl_unit   = matches[0]
             
-            self.flux = file[0].data[0:nw]
-            self.wl   = [crval1 + cd1_1*i for i in range(nw)]
+            self.flux    = file[0].data[0:nw]
+            self.wl      = [crval1 + cd1_1*i for i in range(nw)]
+            self.wl_orig = self.wl
             
     def fillFromData(self, wl, flux):
-        self.wl   = wl
-        self.flux = flux
+        self.wl      = wl
+        self.wl_orig = wl
+        self.flux    = flux
         
     def fillFlux(self, flux):
         self.flux = flux
@@ -82,6 +85,11 @@ class Spettro1D:
     #    USEFUL METHODS    #
     ########################
     
+    def cutRange(self, wl_min, wl_max):
+        self.flux = [self.flux[i] for i in range(len(self.wl)) if wl_min <= self.wl[i] <= wl_max]
+        self.wl   = [l for l in self.wl if wl_min <= l <= wl_max]
+        self.wl_orig = self.wl
+    
     def linearInterpolation(self, x):
         ia = min(range(len(self.wl)), key=lambda i: abs(self.wl[i]-x))
         if ia == (len(self.wl) - 1):
@@ -91,13 +99,14 @@ class Spettro1D:
         xb = self.wl[ib]
         ya = self.flux[ia]
         yb = self.flux[ib]
+        #y = (ya*(xb - x) + yb*(x - xb)) / (xb - xa)
         y = ya + (x - xa) / (xb - xa) * (yb - ya)
         return y
 
     def dopplerCorrection(self, vel):
         # vel in km/s
         light_speed = 299792.458 # km/s
-        self.wl = [x*(1 + vel/light_speed) for x in self.wl]
+        self.wl = [x*(1 + vel/light_speed) for x in self.wl_orig]
         
     def squareDiff(self, compare_sp):
         a_flux = [compare_sp.linearInterpolation(x) for x in self.wl]
