@@ -1,10 +1,8 @@
-import sys
 import scipy.signal
 import matplotlib.pyplot as plt
 import numpy as np
 from astropy.io import fits
 import re
-import glob
 
 class Spettro1D:
     
@@ -62,6 +60,9 @@ class Spettro1D:
     def getWlArray(self):
         return self.wl
     
+    def getWlRange(self):
+        return [min(self.wl), max(self.wl)]
+    
     def getWlUnit(self):
         return self.wl_unit
     
@@ -113,6 +114,12 @@ class Spettro1D:
         b_flux = self.getFluxArray()
         square_diff = [(a-b)**2 for a, b in zip(a_flux, b_flux)]
         return sum(square_diff)
+    
+    def diff(self, compare_sp):
+        a_flux = self.getFluxArray()
+        b_flux = [compare_sp.linearInterpolation(x) for x in self.wl]
+        diff = [(a-b) for a, b in zip(a_flux, b_flux)]
+        return diff
     
     def continuumCorrection(self, order=3, hi_rej=1, lo_rej=1, iterations=10, output=None, outputfile=None):
         x = self.wl
