@@ -3,6 +3,9 @@ import matplotlib.pyplot as plt
 import numpy as np
 from astropy.io import fits
 import re
+import math
+from numpy.fft import fft, ifft, fft2, ifft2, fftshift
+from scipy import optimize
 
 class Spettro1D:
     
@@ -12,6 +15,9 @@ class Spettro1D:
         self.wl_orig   = []
         self.flux      = []
         
+        # fits header
+        self.header    = None
+        
         # ancillary informations
         self.aperture  = None
         self.beam      = None
@@ -20,6 +26,9 @@ class Spettro1D:
         
     def readFits(self, filename):
         with fits.open(filename) as file:
+            
+            self.header = file[0].header
+            
             cd1_1  = file[0].header['CD1_1']
             crval1 = file[0].header['CRVAL1']
             nw     = file[0].header['NAXIS1']
@@ -51,11 +60,17 @@ class Spettro1D:
     def getData(self):
         return (self.wl, self.flux)
     
+    def getDispersion(self):
+        return self.wl[1] - self.wl[0]
+    
     def getFluxArray(self):
         return self.flux
     
     def getFluxUnit(self):
         return self.flux_unit
+    
+    def getHeader(self):
+        return self.header
     
     def getWlArray(self):
         return self.wl
@@ -121,6 +136,14 @@ class Spettro1D:
         diff = [(a-b) for a, b in zip(a_flux, b_flux)]
         return diff
     
+    def radialVelocity(self, compare_sp, rv_min, rv_max, rv_step):
+        diff = {}
+        for v in np.arange(rv_min, rv_max, rv_step):
+            compare_sp.dopplerCorrection(v)        
+            diff[v] = self.squareDiff(compare_sp)
+        vel = min(diff, key=diff.get)
+        return vel
+    
     def continuumCorrection(self, order=3, hi_rej=1, lo_rej=1, iterations=10, output=None, outputfile=None):
         x = self.wl
         y = self.flux
@@ -159,15 +182,59 @@ class Spettro1D:
             
         return self.cc_y
         
+    def fxcor(self, ref_sp, output=False):
+        
+        x = [self.linearInterpolation(x) for x in ref_sp.getWlArray()]
+        y = ref_sp.getFluxArray()
+    
+        def gauss(x, bs, amp, mu, sigma):
+            return bs + amp*np.exp(-(x-mu)**2/(2*sigma**2))
+
+        assert len(x) == len(y)
+
+        f1 = fft(x)
+        f2 = fft(np.flipud(y))
+        cc = np.real(ifft(f1 * f2))
+        corr = fftshift(cc)
+
+        assert len(corr) == len(x)
+
+        coarse_bs    = np.median(corr)
+        coarse_amp   = max(corr) - coarse_bs
+        coarse_mu    = float(np.argmax(corr))
+        coarse_sigma = 2.0
+
+        p0 = [coarse_bs, coarse_amp, coarse_mu, coarse_sigma]
+        p1 = optimize.curve_fit(gauss, np.linspace(0, len(corr)-1, len(corr)), corr, p0=p0)
+        
+        if output:
+            x1 = np.linspace(0, len(corr)-1, 2000)
+            fig = plt.figure(figsize=(10, 6), dpi=100)
+            plt.plot(corr, lw=0.5)
+            plt.plot(x1, gauss(x1, p1[0][0], p1[0][1], p1[0][2], p1[0][3]))
+            plt.xlim(coarse_mu-50, coarse_mu+50)
+            plt.show()
+
+        zero_index = int(len(x) / 2) - 1
+        shift = zero_index - p1[0][2]
+        rv = shift*self.getDispersion()/self.getCentralWl()*299792.458
+        return rv
+
 class SpettroEchelle:
     
     def __init__(self):
         self.onedspecs = {}
         self.flux_unit = 'ADU' # ADU as default
         self.wl_unit   = None
+        self.header    = None
+        
+    def getAperturesList(self):
+        return self.onedspecs.keys()
     
     def readFits(self, filename):
         with fits.open(filename) as file:
+            
+            self.header = file[0].header
         
             # take wavelenght information from header
             wl_infos = ''
@@ -181,7 +248,7 @@ class SpettroEchelle:
             self.wl_unit = matches[0]
             
             # parse wl info
-            matches = re.findall(r"spec\d+\s+=\s+\"([\d\s\.]+)\"", wl_infos)
+            matches = re.findall(r"spec\d+\s+=\s+\"([\d\s\.\-E]+)\"", wl_infos)
             i = 0
             for match in matches:
                 data = re.split(r"\s+", match)
@@ -191,9 +258,14 @@ class SpettroEchelle:
                 w1   = float(data[3])
                 dw   = float(data[4])
                 nw   = int(data[5])
+                
+                if (file[0].header['NAXIS'] == 3):
+                    raw_data = file[0].data[0]
+                else:
+                    raw_data = file[0].data
 
                 self.onedspecs[ap] = Spettro1D()
-                self.onedspecs[ap].fillFromData([w1 + dw*i for i in range(nw)], file[0].data[i][0:nw])
+                self.onedspecs[ap].fillFromData([w1 + dw*i for i in range(nw)], raw_data[i][0:nw])
                 self.onedspecs[ap].setAperture(ap)
                 self.onedspecs[ap].setBeam(beam)
 
@@ -213,3 +285,7 @@ class SpettroEchelle:
         for ap in self.onedspecs:
             mins[ap] = abs(self.onedspecs[ap].getCentralWl() - wl_0)
         return self.getApertureAs1DSpec(min(mins, key=mins.get))
+    
+    def getHeader(self):
+        return self.header
+    
